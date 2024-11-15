@@ -37,7 +37,22 @@ public:
     net::MdnsProvider& get_mdns_provider();
 
 private:
+    enum class NetworkType {
+        //! WiFi access point mode.
+        Ap,
+
+        //! WiFi station mode.
+        Sta,
+
+        //! Last invalid type.
+        Last,
+    };
+
+    status::StatusCode read_network_type_(NetworkType& type);
+
     void initialize_nework_();
+    void initialize_network_ap_();
+    void initialize_network_sta_();
 
     status::StatusCode start_();
     void stop_();
@@ -45,7 +60,7 @@ private:
     static const unsigned max_ssid_size_ = 32;
     static const unsigned max_password_size_ = 64;
 
-    storage::StoragePtr sta_storage_;
+    storage::StoragePtr storage_;
 
     std::unique_ptr<net::BasicNetwork> network_;
     std::unique_ptr<net::MdnsProvider> mdns_provider_;

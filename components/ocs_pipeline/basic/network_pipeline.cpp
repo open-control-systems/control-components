@@ -12,6 +12,7 @@
 
 #include "ocs_algo/storage_ops.h"
 #include "ocs_core/log.h"
+#include "ocs_net/ap_network.h"
 #include "ocs_net/sta_network.h"
 #include "ocs_pipeline/basic/network_pipeline.h"
 #include "ocs_status/code_to_str.h"
@@ -27,10 +28,11 @@ const char* log_tag = "network_pipeline";
 } // namespace
 
 NetworkPipeline::NetworkPipeline(storage::StorageBuilder& storage_builder) {
-    sta_storage_ = storage_builder.make("net_sta");
-    configASSERT(sta_storage_);
+    storage_ = storage_builder.make("net_wifi");
+    configASSERT(storage_);
 
     initialize_nework_();
+    configASSERT(network_);
 
     mdns_provider_.reset(new (std::nothrow) net::MdnsProvider(net::MdnsProvider::Params {
         .hostname = CONFIG_OCS_NETWORK_MDNS_HOSTNAME,
@@ -57,28 +59,102 @@ net::MdnsProvider& NetworkPipeline::get_mdns_provider() {
 }
 
 void NetworkPipeline::initialize_nework_() {
+    NetworkType network_type = NetworkType::Last;
+
+    auto code = read_network_type_(network_type);
+    if (code != status::StatusCode::OK) {
+        ocs_logw(log_tag, "failed to read network type from storage: %s",
+                 status::code_to_str(code));
+
+        network_type = NetworkType::Ap;
+    }
+
+    switch (network_type) {
+    case NetworkType::Ap:
+        initialize_network_ap_();
+        break;
+
+    case NetworkType::Sta:
+        initialize_network_sta_();
+        break;
+
+    default:
+        //! Should not happen.
+        configASSERT(false);
+    }
+}
+
+status::StatusCode NetworkPipeline::read_network_type_(NetworkType& type) {
+    unsigned network_type = 0;
+
+    auto code = storage_->read("net_type", &type, sizeof(type));
+    if (code != status::StatusCode::OK) {
+        return code;
+    }
+
+    if (network_type >= static_cast<unsigned>(NetworkType::Last)) {
+        return status::StatusCode::InvalidState;
+    }
+
+    type = static_cast<NetworkType>(network_type);
+
+    return status::StatusCode::OK;
+}
+
+void NetworkPipeline::initialize_network_ap_() {
     char ssid[max_ssid_size_];
     memset(ssid, 0, sizeof(ssid));
 
     auto code =
-        algo::StorageOps::prob_read(*sta_storage_, "net_sta_ssid", ssid, max_ssid_size_);
+        algo::StorageOps::prob_read(*storage_, "net_ap_ssid", ssid, max_ssid_size_);
     if (code != status::StatusCode::OK) {
-        ocs_logw(log_tag, "failed to read STA SSID from storage, use builtin: %s",
+        ocs_logw(log_tag, "failed to read WiFi AP SSID from storage, use builtin: %s",
                  status::code_to_str(code));
 
-        strncpy(ssid, CONFIG_OCS_NETWORK_WIFI_STA_SSID, sizeof(ssid));
+        //! TODO: use bonsai-firmware-<device_id>
+        strncpy(ssid, "BONSAI-FIRMWARE-SSID", sizeof(ssid));
     }
 
     char password[max_password_size_];
     memset(password, 0, sizeof(password));
 
-    code = algo::StorageOps::prob_read(*sta_storage_, "net_sta_pswd", password,
+    code = algo::StorageOps::prob_read(*storage_, "net_ap_pswd", password,
                                        max_password_size_);
     if (code != status::StatusCode::OK) {
-        ocs_logw(log_tag, "failed to read STA password from storage, use builtin: %s",
+        ocs_logw(log_tag, "failed to read WiFi AP password from storage, use builtin: %s",
                  status::code_to_str(code));
 
-        strncpy(password, CONFIG_OCS_NETWORK_WIFI_STA_PASSWORD, sizeof(password));
+        //! TODO: use <device_id>
+        strncpy(password, "BONSAI-FIRMWARE-PASSWORD", sizeof(password));
+    }
+
+    network_.reset(new (std::nothrow) net::ApNetwork(net::ApNetwork::Params {
+        .ssid = ssid,
+        .password = password,
+        .channel = CONFIG_OCS_NETWORK_WIFI_AP_CHANNEL,
+        .max_connection = CONFIG_OCS_NETWORK_WIFI_AP_MAX_CONN,
+    }));
+}
+
+void NetworkPipeline::initialize_network_sta_() {
+    char ssid[max_ssid_size_];
+    memset(ssid, 0, sizeof(ssid));
+
+    auto code =
+        algo::StorageOps::prob_read(*storage_, "net_sta_ssid", ssid, max_ssid_size_);
+    if (code != status::StatusCode::OK) {
+        ocs_logw(log_tag, "failed to read WiFi STA SSID from storage: %s",
+                 status::code_to_str(code));
+    }
+
+    char password[max_password_size_];
+    memset(password, 0, sizeof(password));
+
+    code = algo::StorageOps::prob_read(*storage_, "net_sta_pswd", password,
+                                       max_password_size_);
+    if (code != status::StatusCode::OK) {
+        ocs_logw(log_tag, "failed to read WiFi STA password from storage: %s",
+                 status::code_to_str(code));
     }
 
     network_.reset(new (std::nothrow) net::StaNetwork(net::StaNetwork::Params {
@@ -86,7 +162,6 @@ void NetworkPipeline::initialize_nework_() {
         .ssid = ssid,
         .password = password,
     }));
-    configASSERT(network_);
 }
 
 status::StatusCode NetworkPipeline::start_() {

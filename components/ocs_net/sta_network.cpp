@@ -110,14 +110,15 @@ status::StatusCode StaNetwork::wait() {
                             pdFALSE, pdFALSE, portMAX_DELAY);
 
     if (bits & EVENT_BIT_CONNECTED) {
-        ocs_logi(log_tag, "connected to AP: SSID=%s RSSI=%d",
-                 CONFIG_OCS_NETWORK_WIFI_STA_SSID, get_rssi());
+        ocs_logi(log_tag, "connected to AP: SSID=%s RSSI=%d", params_.ssid.c_str(),
+                 get_rssi());
+
         return status::StatusCode::OK;
     }
 
     if (bits & EVENT_BIT_FAILED) {
-        ocs_logi(log_tag, "failed to connect to AP: SSID=%s",
-                 CONFIG_OCS_NETWORK_WIFI_STA_SSID);
+        ocs_logi(log_tag, "failed to connect to AP: SSID=%s", params_.ssid.c_str());
+
         return status::StatusCode::Error;
     }
 
